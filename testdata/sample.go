@@ -65,6 +65,66 @@ func ComplexFunction(x, y, z int) string {
 	}
 }
 
+// BadMemoryAllocationInLoop demonstrates allocation inside loop - should be detected
+func BadMemoryAllocationInLoop(data [][]int) [][]int {
+	var results [][]int
+	for i := 0; i < len(data); i++ {
+		temp := make([]int, 10) // Allocates memory each iteration
+		for j := 0; j < 10; j++ {
+			temp[j] = data[i][j] * 2
+		}
+		results = append(results, temp)
+	}
+	return results
+}
+
+// BadSliceWithoutCapacity demonstrates slice creation without capacity - should be detected
+func BadSliceWithoutCapacity(items []string) []string {
+	filtered := make([]string, 0) // Should specify capacity
+	for _, item := range items {
+		if len(item) > 5 {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+// BadMapWithoutSize demonstrates map creation without size hint - should be detected
+func BadMapWithoutSize(users []User) map[int]User {
+	userMap := make(map[int]User) // Should specify size
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+	return userMap
+}
+
+// BadAppendInLoop demonstrates append without preallocation - should be detected
+func BadAppendInLoop(count int) []int {
+	var numbers []int
+	for i := 0; i < count; i++ {
+		numbers = append(numbers, i*i) // Grows slice each time
+	}
+	return numbers
+}
+
+// GoodMemoryPattern shows the optimized version
+func GoodMemoryPattern(data [][]int) [][]int {
+	results := make([][]int, 0, len(data)) // Pre-allocate capacity
+	temp := make([]int, 10)                // Reuse allocation
+
+	for i := 0; i < len(data); i++ {
+		temp = temp[:0] // Reset slice, keep capacity
+		for j := 0; j < 10; j++ {
+			temp = append(temp, data[i][j]*2)
+		}
+		// Copy to avoid sharing underlying array
+		row := make([]int, len(temp))
+		copy(row, temp)
+		results = append(results, row)
+	}
+	return results
+}
+
 type User struct {
 	ID   int
 	Name string

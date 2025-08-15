@@ -29,6 +29,7 @@ func NewAnalyzer() *Analyzer {
 		detectors.NewNestedLoopDetector(),
 		detectors.NewStringConcatDetector(),
 		detectors.NewComplexityDetector(),
+		detectors.NewMemoryAllocDetector(),
 	}
 	return analyzer
 }
