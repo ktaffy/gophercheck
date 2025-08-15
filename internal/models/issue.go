@@ -34,6 +34,9 @@ const (
 	IssueInefficinetDS     IssueType = "inefficient_data_structure"
 	IssueCyclomaticComplex IssueType = "cyclomatic_complexity"
 	IssueMemoryAlloc       IssueType = "memory_allocation"
+	IssueSliceGrowth       IssueType = "slice_growth"    // New: Slice growth patterns
+	IssueFunctionLength    IssueType = "function_length" // New: Function length analysis
+	IssueImportCycle       IssueType = "import_cycle"    // New: Import cycle detection
 )
 
 type Issue struct {
@@ -82,19 +85,32 @@ func (ar *AnalysisResult) CalculateScore() {
 		return
 	}
 
-	// Simple scoring algorithm - can be made more sophisticated
+	// Enhanced scoring algorithm with new issue types
 	penalty := 0
 	for _, issue := range ar.Issues {
+		basePenalty := 0
 		switch issue.Severity {
 		case SeverityLow:
-			penalty += 5
+			basePenalty = 5
 		case SeverityMedium:
-			penalty += 15
+			basePenalty = 15
 		case SeverityHigh:
-			penalty += 30
+			basePenalty = 30
 		case SeverityCritical:
-			penalty += 50
+			basePenalty = 50
 		}
+
+		// Apply multipliers for certain issue types
+		switch issue.Type {
+		case IssueCyclomaticComplex, IssueFunctionLength:
+			basePenalty = int(float64(basePenalty) * 1.2) // 20% more penalty for maintainability issues
+		case IssueNestedLoops, IssueMemoryAlloc:
+			basePenalty = int(float64(basePenalty) * 1.5) // 50% more penalty for performance issues
+		case IssueImportCycle:
+			basePenalty = int(float64(basePenalty) * 1.8) // 80% more penalty for architecture issues
+		}
+
+		penalty += basePenalty
 	}
 
 	score := max(100-penalty, 0)

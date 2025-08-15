@@ -100,8 +100,9 @@ func (r *ReportGenerator) writePerformanceScore(report *strings.Builder, result 
 		emoji = "🚨"
 	}
 
-	report.WriteString(fmt.Sprintf("%s Performance Score: %s\n\n",
-		emoji, scoreColor("%d/100", score)))
+	// Fixed: Use proper string formatting
+	scoreText := scoreColor(fmt.Sprintf("%d", score))
+	report.WriteString(fmt.Sprintf("%s Performance Score: %s/100\n\n", emoji, scoreText))
 }
 
 // writeIssuesSummary writes the issues breakdown by severity
@@ -113,8 +114,9 @@ func (r *ReportGenerator) writeIssuesSummary(report *strings.Builder, result *mo
 		count := result.IssuesBySeverity[severity]
 		if count > 0 {
 			emoji, colorFunc := r.getSeverityDisplay(severity)
-			report.WriteString(fmt.Sprintf("   %s %s: %s\n",
-				emoji, severity, colorFunc("%d", count)))
+			// Fixed: Use proper string formatting
+			countText := colorFunc(fmt.Sprintf("%d", count))
+			report.WriteString(fmt.Sprintf("   %s %s: %s\n", emoji, severity, countText))
 		}
 	}
 }

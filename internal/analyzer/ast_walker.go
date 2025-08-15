@@ -25,12 +25,22 @@ func NewAnalyzer() *Analyzer {
 	analyzer := &Analyzer{
 		fileSet: token.NewFileSet(),
 	}
+
+	// Initialize all detectors including Phase 2 additions
 	analyzer.detectors = []Detector{
+		// Original Phase 1 detectors
 		detectors.NewNestedLoopDetector(),
 		detectors.NewStringConcatDetector(),
 		detectors.NewComplexityDetector(),
 		detectors.NewMemoryAllocDetector(),
+
+		// Phase 2 detectors
+		detectors.NewSliceGrowthDetector(),    // ✅ Slice growth patterns
+		detectors.NewDataStructureDetector(),  // ✅ Map vs Slice usage analysis
+		detectors.NewFunctionLengthDetector(), // ✅ Function length analysis
+		detectors.NewImportCycleDetector(),    // ✅ Import cycle detection
 	}
+
 	return analyzer
 }
 
@@ -41,6 +51,7 @@ func (a *Analyzer) AnalyzeFiles(filenames []string) (*models.AnalysisResult, err
 	for _, filename := range filenames {
 		issues, err := a.analyzeFile(filename)
 		if err != nil {
+			// Log error but continue with other files
 			continue
 		}
 		result.Files = append(result.Files, filename)
@@ -48,6 +59,7 @@ func (a *Analyzer) AnalyzeFiles(filenames []string) (*models.AnalysisResult, err
 			result.AddIssue(issue)
 		}
 	}
+
 	result.AnalysisDuration = time.Since(startTime).String()
 	result.CalculateScore()
 	return result, nil
@@ -58,12 +70,28 @@ func (a *Analyzer) analyzeFile(filename string) ([]models.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	var allIsues []models.Issue
+
+	var allIssues []models.Issue
 	for _, detector := range a.detectors {
 		issues := detector.Detect(file, a.fileSet, filename)
-		allIsues = append(allIsues, issues...)
+		allIssues = append(allIssues, issues...)
 	}
-	return allIsues, nil
+
+	return allIssues, nil
+}
+
+// GetDetectorCount returns the number of active detectors
+func (a *Analyzer) GetDetectorCount() int {
+	return len(a.detectors)
+}
+
+// GetDetectorNames returns the names of all active detectors
+func (a *Analyzer) GetDetectorNames() []string {
+	names := make([]string, len(a.detectors))
+	for i, detector := range a.detectors {
+		names[i] = detector.Name()
+	}
+	return names
 }
 
 type ASTVisitor struct {
