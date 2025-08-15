@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"gophercheck/internal/analyzer/detectors"
+	"gophercheck/internal/config"
 	"gophercheck/internal/models"
 )
 
 type Analyzer struct {
 	fileSet   *token.FileSet
 	detectors []Detector
+	config    *config.Config
 }
 
 type Detector interface {
@@ -22,23 +24,56 @@ type Detector interface {
 }
 
 func NewAnalyzer() *Analyzer {
+	return NewAnalyzerWithConfig(config.DefaultConfig())
+}
+
+func NewAnalyzerWithConfig(cfg *config.Config) *Analyzer {
 	analyzer := &Analyzer{
 		fileSet: token.NewFileSet(),
+		config:  cfg,
+	}
+	// Initialize detectors based on configuration
+	analyzer.detectors = []Detector{}
+
+	// Only add detectors that are enabled in config
+	if cfg.IsRuleEnabled("nested_loops") {
+		detector := detectors.NewNestedLoopDetectorWithConfig(cfg)
+		analyzer.detectors = append(analyzer.detectors, detector)
 	}
 
-	// Initialize all detectors including Phase 2 additions
-	analyzer.detectors = []Detector{
-		// Original Phase 1 detectors
-		detectors.NewNestedLoopDetector(),
-		detectors.NewStringConcatDetector(),
-		detectors.NewComplexityDetector(),
-		detectors.NewMemoryAllocDetector(),
+	if cfg.IsRuleEnabled("string_concat") {
+		detector := detectors.NewStringConcatDetectorWithConfig(cfg)
+		analyzer.detectors = append(analyzer.detectors, detector)
+	}
 
-		// Phase 2 detectors
-		detectors.NewSliceGrowthDetector(),    // ✅ Slice growth patterns
-		detectors.NewDataStructureDetector(),  // ✅ Map vs Slice usage analysis
-		detectors.NewFunctionLengthDetector(), // ✅ Function length analysis
-		detectors.NewImportCycleDetector(),    // ✅ Import cycle detection
+	if cfg.IsRuleEnabled("cyclomatic_complexity") {
+		detector := detectors.NewComplexityDetectorWithConfig(cfg)
+		analyzer.detectors = append(analyzer.detectors, detector)
+	}
+
+	if cfg.IsRuleEnabled("memory_allocation") {
+		detector := detectors.NewMemoryAllocDetectorWithConfig(cfg)
+		analyzer.detectors = append(analyzer.detectors, detector)
+	}
+
+	if cfg.IsRuleEnabled("slice_growth") {
+		detector := detectors.NewSliceGrowthDetectorWithConfig(cfg)
+		analyzer.detectors = append(analyzer.detectors, detector)
+	}
+
+	if cfg.IsRuleEnabled("data_structure") {
+		detector := detectors.NewDataStructureDetectorWithConfig(cfg)
+		analyzer.detectors = append(analyzer.detectors, detector)
+	}
+
+	if cfg.IsRuleEnabled("function_length") {
+		detector := detectors.NewFunctionLengthDetectorWithConfig(cfg)
+		analyzer.detectors = append(analyzer.detectors, detector)
+	}
+
+	if cfg.IsRuleEnabled("import_cycles") {
+		detector := detectors.NewImportCycleDetectorWithConfig(cfg)
+		analyzer.detectors = append(analyzer.detectors, detector)
 	}
 
 	return analyzer
@@ -46,12 +81,16 @@ func NewAnalyzer() *Analyzer {
 
 func (a *Analyzer) AnalyzeFiles(filenames []string) (*models.AnalysisResult, error) {
 	startTime := time.Now()
-	result := models.NewAnalysisResult()
+	var result *models.AnalysisResult
+	if a.config != nil {
+		result = models.NewAnalysisResultWithConfig(a.config)
+	} else {
+		result = models.NewAnalysisResult()
+	}
 
 	for _, filename := range filenames {
 		issues, err := a.analyzeFile(filename)
 		if err != nil {
-			// Log error but continue with other files
 			continue
 		}
 		result.Files = append(result.Files, filename)
@@ -61,8 +100,16 @@ func (a *Analyzer) AnalyzeFiles(filenames []string) (*models.AnalysisResult, err
 	}
 
 	result.AnalysisDuration = time.Since(startTime).String()
-	result.CalculateScore()
+	if a.config != nil {
+		result.CalculateScoreWithConfig()
+	} else {
+		result.CalculateScore()
+	}
 	return result, nil
+}
+
+func (a *Analyzer) GetConfig() *config.Config {
+	return a.config
 }
 
 func (a *Analyzer) analyzeFile(filename string) ([]models.Issue, error) {
@@ -80,12 +127,10 @@ func (a *Analyzer) analyzeFile(filename string) ([]models.Issue, error) {
 	return allIssues, nil
 }
 
-// GetDetectorCount returns the number of active detectors
 func (a *Analyzer) GetDetectorCount() int {
 	return len(a.detectors)
 }
 
-// GetDetectorNames returns the names of all active detectors
 func (a *Analyzer) GetDetectorNames() []string {
 	names := make([]string, len(a.detectors))
 	for i, detector := range a.detectors {

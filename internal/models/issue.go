@@ -1,6 +1,9 @@
 package models
 
-import "go/token"
+import (
+	"go/token"
+	"gophercheck/internal/config"
+)
 
 type Severity int
 
@@ -63,6 +66,7 @@ type AnalysisResult struct {
 	Issues           []Issue        `json:"issues"`
 	PerformanceScore int            `json:"performance_score"` // 0-100 scale
 	AnalysisDuration string         `json:"analysis_duration"`
+	Config           *config.Config `json:"-"` // Don't serialize config in JSON
 }
 
 func NewAnalysisResult() *AnalysisResult {
@@ -115,4 +119,66 @@ func (ar *AnalysisResult) CalculateScore() {
 
 	score := max(100-penalty, 0)
 	ar.PerformanceScore = score
+}
+
+func NewAnalysisResultWithConfig(cfg *config.Config) *AnalysisResult {
+	result := NewAnalysisResult()
+	result.Config = cfg
+	return result
+}
+
+func (ar *AnalysisResult) CalculateScoreWithConfig() {
+	if ar.Config == nil {
+		ar.CalculateScore()
+		return
+	}
+	if ar.TotalIssues == 0 {
+		ar.PerformanceScore = ar.Config.Analysis.ScoreThresholds.Excellent
+		return
+	}
+
+	penalty := 0
+	for _, issue := range ar.Issues {
+		basePenalty := 0
+		switch issue.Severity {
+		case SeverityLow:
+			basePenalty = 5
+		case SeverityMedium:
+			basePenalty = 15
+		case SeverityHigh:
+			basePenalty = 30
+		case SeverityCritical:
+			basePenalty = 50
+		}
+
+		switch issue.Type {
+		case IssueCyclomaticComplex, IssueFunctionLength:
+			if ar.containsCategory("complexity") {
+				basePenalty = int(float64(basePenalty) * 1.2)
+			}
+		case IssueNestedLoops, IssueMemoryAlloc:
+			if ar.containsCategory("performance") {
+				basePenalty = int(float64(basePenalty) * 1.5)
+			}
+		case IssueImportCycle:
+			if ar.containsCategory("quality") {
+				basePenalty = int(float64(basePenalty) * 1.8)
+			}
+		}
+		penalty += basePenalty
+	}
+	score := max(ar.Config.Analysis.ScoreThresholds.Excellent-penalty, 0)
+	ar.PerformanceScore = score
+}
+
+func (ar *AnalysisResult) containsCategory(category string) bool {
+	if ar.Config == nil {
+		return true
+	}
+	for _, c := range ar.Config.Analysis.EnabledCategories {
+		if c == category {
+			return true
+		}
+	}
+	return false
 }

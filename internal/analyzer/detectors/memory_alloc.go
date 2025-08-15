@@ -4,14 +4,27 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"gophercheck/internal/config"
 	"gophercheck/internal/models"
 	"strings"
 )
 
-type MemoryAllocDetector struct{}
+type MemoryAllocDetector struct {
+	config *config.Config
+}
 
 func NewMemoryAllocDetector() *MemoryAllocDetector {
 	return &MemoryAllocDetector{}
+}
+
+func NewMemoryAllocDetectorWithConfig(cfg *config.Config) *MemoryAllocDetector {
+	return &MemoryAllocDetector{
+		config: cfg,
+	}
+}
+
+func (d *MemoryAllocDetector) SetConfig(cfg *config.Config) {
+	d.config = cfg
 }
 
 func (d *MemoryAllocDetector) Name() string {
@@ -25,6 +38,7 @@ func (d *MemoryAllocDetector) Detect(file *ast.File, fset *token.FileSet, filena
 		issues:      make([]models.Issue, 0),
 		loopDepth:   0,
 		currentFunc: "",
+		detector:    d,
 	}
 	ast.Walk(detector, file)
 	return detector.issues
@@ -37,6 +51,7 @@ type memoryAllocVisitor struct {
 	loopDepth   int
 	currentFunc string
 	inLoop      bool
+	detector    *MemoryAllocDetector
 }
 
 func (v *memoryAllocVisitor) Visit(node ast.Node) ast.Visitor {
@@ -75,14 +90,32 @@ func (v *memoryAllocVisitor) Visit(node ast.Node) ast.Visitor {
 }
 
 func (v *memoryAllocVisitor) checkAllocationInLoop(call *ast.CallExpr) {
+	detectInLoops := true // default
+	if v.detector.config != nil && v.detector.config.Rules.Memory.Allocation.Enabled {
+		detectInLoops = v.detector.config.Rules.Memory.Allocation.DetectInLoops
+	}
+
+	if !detectInLoops {
+		return
+	}
+
 	if v.isAllocationCall(call) {
 		allocType := v.getAllocationType(call)
 		v.createIssue(call, fmt.Sprintf("Memory allocation (%s) inside loop", allocType), v.generateLoopAllocationSuggestion(allocType), models.SeverityHigh)
 	}
+
 }
 
 func (v *memoryAllocVisitor) checkInefficientAllocation(call *ast.CallExpr) {
-	// Check for make([]T, 0) without capacity
+	requireCapacityHints := true // default
+	if v.detector.config != nil && v.detector.config.Rules.Memory.Allocation.Enabled {
+		requireCapacityHints = v.detector.config.Rules.Memory.Allocation.RequireCapacityHints
+	}
+
+	if !requireCapacityHints {
+		return
+	}
+
 	if v.isMakeSliceWithoutCapacity(call) {
 		v.createIssue(call,
 			"Slice created without capacity hint - may cause multiple reallocations",
@@ -90,7 +123,6 @@ func (v *memoryAllocVisitor) checkInefficientAllocation(call *ast.CallExpr) {
 			models.SeverityMedium)
 	}
 
-	// Check for make(map[K]V) with predictable size
 	if v.isMakeMapWithoutSize(call) {
 		v.createIssue(call,
 			"Map created without size hint - may cause rehashing",
@@ -100,7 +132,15 @@ func (v *memoryAllocVisitor) checkInefficientAllocation(call *ast.CallExpr) {
 }
 
 func (v *memoryAllocVisitor) checkAppendWithoutPrealloc(assign *ast.AssignStmt) {
-	// Look for patterns like: slice = append(slice, ...)
+	minLoopIterations := 5 // default
+	if v.detector.config != nil && v.detector.config.Rules.Memory.Allocation.Enabled {
+		minLoopIterations = v.detector.config.Rules.Memory.Allocation.MinLoopIterations
+	}
+
+	if v.loopDepth < minLoopIterations {
+		return
+	}
+
 	if len(assign.Rhs) == 1 {
 		if call, ok := assign.Rhs[0].(*ast.CallExpr); ok {
 			if v.isAppendCall(call) && v.loopDepth > 0 {

@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"gophercheck/internal/config"
 	"gophercheck/internal/models"
 	"path"
 	"strings"
 )
 
-// ImportCycleDetector finds circular dependencies that affect compilation time
 type ImportCycleDetector struct {
 	packages map[string]*packageInfo
 	analyzed map[string]bool
+	config   *config.Config
 }
 
 func NewImportCycleDetector() *ImportCycleDetector {
@@ -20,6 +21,18 @@ func NewImportCycleDetector() *ImportCycleDetector {
 		packages: make(map[string]*packageInfo),
 		analyzed: make(map[string]bool),
 	}
+}
+
+func NewImportCycleDetectorWithConfig(cfg *config.Config) *ImportCycleDetector {
+	return &ImportCycleDetector{
+		packages: make(map[string]*packageInfo),
+		analyzed: make(map[string]bool),
+		config:   cfg,
+	}
+}
+
+func (d *ImportCycleDetector) SetConfig(cfg *config.Config) {
+	d.config = cfg
 }
 
 func (d *ImportCycleDetector) Name() string {
@@ -63,7 +76,6 @@ type importCycleVisitor struct {
 func (v *importCycleVisitor) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
 	case *ast.File:
-		// Get package name
 		if n.Name != nil {
 			v.packageName = n.Name.Name
 		}
@@ -87,10 +99,8 @@ func (v *importCycleVisitor) processImports(decl *ast.GenDecl) {
 	for _, spec := range decl.Specs {
 		if importSpec, ok := spec.(*ast.ImportSpec); ok {
 			if importSpec.Path != nil {
-				// Remove quotes from import path
 				importPath := strings.Trim(importSpec.Path.Value, `"`)
 
-				// Skip standard library imports
 				if !v.isThirdPartyOrLocalImport(importPath) {
 					continue
 				}
@@ -119,7 +129,20 @@ func (v *importCycleVisitor) processImports(decl *ast.GenDecl) {
 }
 
 func (v *importCycleVisitor) isThirdPartyOrLocalImport(importPath string) bool {
-	// Skip standard library packages (no dots, common stdlib prefixes)
+	if v.detector.config != nil && v.detector.config.Rules.Quality.ImportCycles.Enabled {
+		for _, excluded := range v.detector.config.Rules.Quality.ImportCycles.ExcludePackages {
+			if importPath == excluded || strings.HasPrefix(importPath, excluded+"/") {
+				return false
+			}
+		}
+
+		if v.detector.config.Rules.Quality.ImportCycles.IgnoreVendor {
+			if strings.HasPrefix(importPath, "vendor/") || strings.Contains(importPath, "/vendor/") {
+				return false
+			}
+		}
+	}
+
 	stdLibPrefixes := []string{
 		"fmt", "os", "io", "net", "http", "time", "strings", "strconv",
 		"context", "sync", "encoding", "crypto", "database", "archive",
@@ -136,7 +159,6 @@ func (v *importCycleVisitor) isThirdPartyOrLocalImport(importPath string) bool {
 		}
 	}
 
-	// Consider it third-party or local if it contains dots or is relative
 	return strings.Contains(importPath, ".") || strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../")
 }
 
@@ -150,7 +172,6 @@ func (v *importCycleVisitor) getPackagePathFromFile(filename string) string {
 	return dir
 }
 
-// findCycles uses DFS to detect import cycles
 func (d *ImportCycleDetector) findCycles() [][]string {
 	var cycles [][]string
 	visited := make(map[string]bool)
@@ -226,6 +247,27 @@ func (v *importCycleVisitor) createCycleIssue(cycle []string) {
 		return
 	}
 
+	// Check config settings
+	if v.detector.config != nil && v.detector.config.Rules.Quality.ImportCycles.Enabled {
+		cycleLen := len(cycle) - 1 // Remove duplicate at end
+		maxCycleLength := v.detector.config.Rules.Quality.ImportCycles.MaxCycleLength
+
+		// Don't report cycles that are within acceptable limits
+		if cycleLen <= maxCycleLength {
+			return
+		}
+
+		// Check if test packages should be ignored
+		if v.detector.config.Rules.Quality.ImportCycles.IgnoreTestPackages {
+			// Skip if any package in cycle appears to be a test package
+			for _, pkg := range cycle {
+				if strings.Contains(pkg, "_test") || strings.Contains(pkg, "/test") {
+					return
+				}
+			}
+		}
+	}
+
 	// Find the package in our current file that's part of the cycle
 	currentPackage := v.getPackagePathFromFile(v.filename)
 
@@ -268,13 +310,20 @@ func (v *importCycleVisitor) createCycleIssue(cycle []string) {
 }
 
 func (v *importCycleVisitor) calculateCycleSeverity(cycleLength int) models.Severity {
+	maxCycleLength := 5 // default
+	if v.detector.config != nil && v.detector.config.Rules.Quality.ImportCycles.Enabled {
+		maxCycleLength = v.detector.config.Rules.Quality.ImportCycles.MaxCycleLength
+	}
+
+	ratio := float64(cycleLength) / float64(maxCycleLength)
+
 	switch {
-	case cycleLength >= 5:
-		return models.SeverityCritical // Very complex cycle
-	case cycleLength >= 4:
-		return models.SeverityHigh // Complex cycle
-	case cycleLength >= 3:
-		return models.SeverityMedium // Simple cycle
+	case ratio >= 1.5: // 150% of max = critical
+		return models.SeverityCritical
+	case ratio >= 1.2: // 120% of max = high
+		return models.SeverityHigh
+	case ratio >= 1.0: // 100% of max = medium
+		return models.SeverityMedium
 	default:
 		return models.SeverityLow
 	}
@@ -289,8 +338,8 @@ func (v *importCycleVisitor) generateCycleSuggestion(cycle []string) string {
 2. **Extract Common Code**: Move shared functionality to a separate package
 3. **Merge Packages**: If packages are tightly coupled, consider combining them
 4. **Remove Unnecessary Dependencies**: Review if all imports are actually needed`
-
-	if cycleLen == 2 {
+	switch {
+	case cycleLen == 2:
 		return baseAdvice + `
 
 For 2-package cycles:
@@ -308,7 +357,7 @@ For 2-package cycles:
 // package B implements interface, no import of A
 // main wires them together`
 
-	} else if cycleLen == 3 {
+	case cycleLen == 3:
 		return baseAdvice + `
 
 For 3-package cycles (A → B → C → A):
@@ -322,7 +371,7 @@ Example refactoring:
 // After:  A → common ← B ← C
 //    common contains interfaces used by all`
 
-	} else {
+	default:
 		return baseAdvice + fmt.Sprintf(`
 
 Complex %d-package cycle requires architectural review:

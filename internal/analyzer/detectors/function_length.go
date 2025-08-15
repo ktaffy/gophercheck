@@ -4,14 +4,27 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"gophercheck/internal/config"
 	"gophercheck/internal/models"
 )
 
 // FunctionLengthDetector finds overly long functions that should be refactored
-type FunctionLengthDetector struct{}
+type FunctionLengthDetector struct {
+	config *config.Config
+}
 
 func NewFunctionLengthDetector() *FunctionLengthDetector {
 	return &FunctionLengthDetector{}
+}
+
+func NewFunctionLengthDetectorWithConfig(cfg *config.Config) *FunctionLengthDetector {
+	return &FunctionLengthDetector{
+		config: cfg,
+	}
+}
+
+func (d *FunctionLengthDetector) SetConfig(cfg *config.Config) {
+	d.config = cfg
 }
 
 func (d *FunctionLengthDetector) Name() string {
@@ -23,6 +36,7 @@ func (d *FunctionLengthDetector) Detect(file *ast.File, fset *token.FileSet, fil
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
+		detector: d,
 	}
 
 	ast.Walk(detector, file)
@@ -33,6 +47,7 @@ type functionLengthVisitor struct {
 	fset     *token.FileSet
 	filename string
 	issues   []models.Issue
+	detector *FunctionLengthDetector
 }
 
 const (
@@ -60,8 +75,11 @@ func (v *functionLengthVisitor) analyzeFunctionLength(fn *ast.FuncDecl) {
 
 	funcName := v.getFunctionName(fn)
 
-	// Check if function exceeds thresholds
-	if actualLOC >= MediumThreshold {
+	mediumThreshold := 50
+	if v.detector.config != nil && v.detector.config.Rules.Complexity.FunctionLength.Enabled {
+		mediumThreshold = v.detector.config.Rules.Complexity.FunctionLength.MediumThreshold
+	}
+	if actualLOC >= mediumThreshold {
 		severity := v.calculateSeverity(actualLOC)
 		v.createLengthIssue(fn, funcName, actualLOC, totalLines, severity)
 	}
@@ -90,12 +108,22 @@ func (v *functionLengthVisitor) countActualLinesOfCode(body *ast.BlockStmt) int 
 }
 
 func (v *functionLengthVisitor) calculateSeverity(loc int) models.Severity {
+	mediumThreshold := 50
+	highThreshold := 100
+	criticalThreshold := 200
+
+	if v.detector.config != nil && v.detector.config.Rules.Complexity.FunctionLength.Enabled {
+		mediumThreshold = v.detector.config.Rules.Complexity.FunctionLength.MediumThreshold
+		highThreshold = v.detector.config.Rules.Complexity.FunctionLength.HighThreshold
+		criticalThreshold = v.detector.config.Rules.Complexity.FunctionLength.CriticalThreshold
+	}
+
 	switch {
-	case loc >= CriticalThreshold:
+	case loc >= criticalThreshold:
 		return models.SeverityCritical
-	case loc >= HighThreshold:
+	case loc >= highThreshold:
 		return models.SeverityHigh
-	case loc >= MediumThreshold:
+	case loc >= mediumThreshold:
 		return models.SeverityMedium
 	default:
 		return models.SeverityLow

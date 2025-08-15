@@ -5,13 +5,26 @@ import (
 	"go/ast"
 	"go/token"
 
+	"gophercheck/internal/config"
 	"gophercheck/internal/models"
 )
 
-type NestedLoopDetector struct{}
+type NestedLoopDetector struct {
+	config *config.Config
+}
 
 func NewNestedLoopDetector() *NestedLoopDetector {
 	return &NestedLoopDetector{}
+}
+
+func NewNestedLoopDetectorWithConfig(cfg *config.Config) *NestedLoopDetector {
+	return &NestedLoopDetector{
+		config: cfg,
+	}
+}
+
+func (d *NestedLoopDetector) SetConfig(cfg *config.Config) {
+	d.config = cfg
 }
 
 func (d *NestedLoopDetector) Name() string {
@@ -23,6 +36,7 @@ func (d *NestedLoopDetector) Detect(file *ast.File, fset *token.FileSet, filenam
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
+		detector: d,
 	}
 	ast.Walk(detector, file)
 	return detector.issues
@@ -34,34 +48,31 @@ type nestedLoopVisitor struct {
 	issues      []models.Issue
 	loopDepth   int
 	currentFunc string
+	detector    *NestedLoopDetector
 }
 
 func (v *nestedLoopVisitor) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
 	case *ast.FuncDecl:
-		// Track current function for better error reporting
 		if n.Name != nil {
 			v.currentFunc = n.Name.Name
 		}
 		return v
-
 	case *ast.ForStmt, *ast.RangeStmt:
-		// We found a loop
 		v.loopDepth++
-
-		// If we're already in a loop (depth > 1), this is nested
-		if v.loopDepth > 1 {
+		maxDepth := 1
+		if v.detector.config != nil && v.detector.config.Rules.Performance.NestedLoops.Enabled {
+			maxDepth = v.detector.config.Rules.Performance.NestedLoops.MaxDepth
+		}
+		if v.loopDepth > maxDepth {
 			v.detectNestedLoop(n)
 		}
-
-		// Continue visiting children
 		for _, child := range getLoopBody(n) {
 			ast.Walk(v, child)
 		}
 
 		v.loopDepth--
-		return nil // Don't visit children again
-
+		return nil
 	default:
 		return v
 	}

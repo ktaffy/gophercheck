@@ -4,14 +4,26 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"gophercheck/internal/config"
 	"gophercheck/internal/models"
 )
 
-// SliceGrowthDetector finds inefficient slice growth patterns
-type SliceGrowthDetector struct{}
+type SliceGrowthDetector struct {
+	config *config.Config
+}
 
 func NewSliceGrowthDetector() *SliceGrowthDetector {
 	return &SliceGrowthDetector{}
+}
+
+func NewSliceGrowthDetectorWithConfig(cfg *config.Config) *SliceGrowthDetector {
+	return &SliceGrowthDetector{
+		config: cfg,
+	}
+}
+
+func (d *SliceGrowthDetector) SetConfig(cfg *config.Config) {
+	d.config = cfg
 }
 
 func (d *SliceGrowthDetector) Name() string {
@@ -25,6 +37,7 @@ func (d *SliceGrowthDetector) Detect(file *ast.File, fset *token.FileSet, filena
 		issues:      make([]models.Issue, 0),
 		sliceVars:   make(map[string]*sliceInfo),
 		currentFunc: "",
+		detector:    d,
 	}
 
 	ast.Walk(detector, file)
@@ -47,6 +60,7 @@ type sliceGrowthVisitor struct {
 	currentFunc string
 	inLoop      bool
 	loopDepth   int
+	detector    *SliceGrowthDetector
 }
 
 func (v *sliceGrowthVisitor) Visit(node ast.Node) ast.Visitor {
@@ -96,6 +110,11 @@ func (v *sliceGrowthVisitor) checkSliceDeclaration(decl *ast.GenDecl) {
 		return
 	}
 
+	requireCapacity := true // default
+	if v.detector.config != nil && v.detector.config.Rules.Memory.SliceGrowth.Enabled {
+		requireCapacity = v.detector.config.Rules.Memory.SliceGrowth.RequireCapacity
+	}
+
 	for _, spec := range decl.Specs {
 		if valueSpec, ok := spec.(*ast.ValueSpec); ok {
 			for i, name := range valueSpec.Names {
@@ -112,8 +131,7 @@ func (v *sliceGrowthVisitor) checkSliceDeclaration(decl *ast.GenDecl) {
 							appendCount:  0,
 						}
 
-						// Check for slice without capacity
-						if !hasCapacity {
+						if requireCapacity && !hasCapacity {
 							v.createSliceGrowthIssue(name, "Slice declared without capacity hint")
 						}
 					}
@@ -150,21 +168,31 @@ func (v *sliceGrowthVisitor) checkSliceAssignment(assign *ast.AssignStmt) {
 	if len(assign.Rhs) == 1 {
 		if call, ok := assign.Rhs[0].(*ast.CallExpr); ok {
 			if v.isAppendCall(call) {
-				v.trackAppendUsage(assign, call)
+				v.trackAppendUsage(assign)
 			}
 		}
 	}
 }
 
-func (v *sliceGrowthVisitor) trackAppendUsage(assign *ast.AssignStmt, call *ast.CallExpr) {
+func (v *sliceGrowthVisitor) trackAppendUsage(assign *ast.AssignStmt) {
+	detectAppendInLoops := true // default
+	minAppendCount := 3         // default
+
+	if v.detector.config != nil && v.detector.config.Rules.Memory.SliceGrowth.Enabled {
+		detectAppendInLoops = v.detector.config.Rules.Memory.SliceGrowth.DetectAppendInLoops
+		minAppendCount = v.detector.config.Rules.Memory.SliceGrowth.MinAppendCount
+	}
+
+	if !detectAppendInLoops {
+		return
+	}
+
 	if len(assign.Lhs) > 0 {
 		if ident, ok := assign.Lhs[0].(*ast.Ident); ok {
 			if info, exists := v.sliceVars[ident.Name]; exists {
 				info.appendCount++
-
-				// Issue if appending in loop without capacity
-				if v.inLoop && !info.hasCapacity && info.appendCount > 1 {
-					v.createAppendIssue(assign, fmt.Sprintf("Multiple appends to slice '%s' in loop without pre-allocation", ident.Name))
+				if v.inLoop && !info.hasCapacity && info.appendCount >= minAppendCount {
+					v.createAppendIssue(assign, fmt.Sprintf("Multiple appends (%d) to slice '%s' in loop without pre-allocation", info.appendCount, ident.Name))
 				}
 			}
 		}

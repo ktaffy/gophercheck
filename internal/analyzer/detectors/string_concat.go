@@ -3,29 +3,40 @@ package detectors
 import (
 	"go/ast"
 	"go/token"
+	"strings"
 
+	"gophercheck/internal/config"
 	"gophercheck/internal/models"
 )
 
-// StringConcatDetector finds inefficient string concatenation in loops
-type StringConcatDetector struct{}
+type StringConcatDetector struct {
+	config *config.Config
+}
 
-// NewStringConcatDetector creates a new string concatenation detector
 func NewStringConcatDetector() *StringConcatDetector {
 	return &StringConcatDetector{}
 }
 
-// Name returns the detector name
+func NewStringConcatDetectorWithConfig(cfg *config.Config) *StringConcatDetector {
+	return &StringConcatDetector{
+		config: cfg,
+	}
+}
+
+func (d *StringConcatDetector) SetConfig(cfg *config.Config) {
+	d.config = cfg
+}
+
 func (d *StringConcatDetector) Name() string {
 	return "String Concatenation Detector"
 }
 
-// Detect finds inefficient string concatenation patterns
 func (d *StringConcatDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
 	detector := &stringConcatVisitor{
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
+		detector: d,
 	}
 
 	ast.Walk(detector, file)
@@ -38,9 +49,9 @@ type stringConcatVisitor struct {
 	issues      []models.Issue
 	inLoop      bool
 	currentFunc string
+	detector    *StringConcatDetector
 }
 
-// Visit implements the ast.Visitor interface
 func (v *stringConcatVisitor) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
 	case *ast.FuncDecl:
@@ -50,17 +61,15 @@ func (v *stringConcatVisitor) Visit(node ast.Node) ast.Visitor {
 		return v
 
 	case *ast.ForStmt, *ast.RangeStmt:
-		// Mark that we're entering a loop
 		oldInLoop := v.inLoop
 		v.inLoop = true
 
-		// Visit loop body
 		for _, stmt := range getLoopBody(n) {
 			ast.Walk(v, stmt)
 		}
 
 		v.inLoop = oldInLoop
-		return nil // Don't visit children again
+		return nil
 
 	case *ast.AssignStmt:
 		if v.inLoop {
@@ -73,14 +82,20 @@ func (v *stringConcatVisitor) Visit(node ast.Node) ast.Visitor {
 	}
 }
 
-// checkStringConcatenation looks for string concatenation patterns in assignments
 func (v *stringConcatVisitor) checkStringConcatenation(assign *ast.AssignStmt) {
-	// Look for patterns like: str += something or str = str + something
+	detectInLoops := true // default
+	if v.detector.config != nil && v.detector.config.Rules.Performance.StringConcat.Enabled {
+		detectInLoops = v.detector.config.Rules.Performance.StringConcat.DetectInLoops
+	}
+
+	if !v.inLoop || !detectInLoops {
+		return
+	}
+
 	if len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
 		return
 	}
 
-	// Check for += operator
 	if assign.Tok == token.ADD_ASSIGN {
 		if v.isStringVariable(assign.Lhs[0]) {
 			v.createIssue(assign, "String concatenation using += in loop")
@@ -88,7 +103,6 @@ func (v *stringConcatVisitor) checkStringConcatenation(assign *ast.AssignStmt) {
 		return
 	}
 
-	// Check for str = str + something pattern
 	if assign.Tok == token.ASSIGN {
 		if binExpr, ok := assign.Rhs[0].(*ast.BinaryExpr); ok {
 			if binExpr.Op == token.ADD && v.isStringVariable(assign.Lhs[0]) {
@@ -101,12 +115,25 @@ func (v *stringConcatVisitor) checkStringConcatenation(assign *ast.AssignStmt) {
 	}
 }
 
-// isStringVariable checks if an expression likely represents a string variable
 // This is simplified - a full implementation would use type information
 func (v *stringConcatVisitor) isStringVariable(expr ast.Expr) bool {
 	// For now, we'll use heuristics based on common string variable names
 	if ident, ok := expr.(*ast.Ident); ok {
 		name := ident.Name
+
+		// Use config string variable names if available
+		if v.detector.config != nil && v.detector.config.Rules.Performance.StringConcat.Enabled {
+			configNames := v.detector.config.Rules.Performance.StringConcat.StringVarNames
+			if len(configNames) > 0 {
+				for _, configName := range configNames {
+					if name == configName || strings.Contains(strings.ToLower(name), strings.ToLower(configName)) {
+						return true
+					}
+				}
+				return false // If config names specified, only use those
+			}
+		}
+
 		// Common string variable names
 		stringNames := []string{"str", "result", "output", "text", "content", "message", "data"}
 		for _, sname := range stringNames {
@@ -119,7 +146,6 @@ func (v *stringConcatVisitor) isStringVariable(expr ast.Expr) bool {
 	return false
 }
 
-// sameVariable checks if two expressions refer to the same variable
 func (v *stringConcatVisitor) sameVariable(expr1, expr2 ast.Expr) bool {
 	ident1, ok1 := expr1.(*ast.Ident)
 	ident2, ok2 := expr2.(*ast.Ident)
@@ -130,7 +156,6 @@ func (v *stringConcatVisitor) sameVariable(expr1, expr2 ast.Expr) bool {
 	return false
 }
 
-// createIssue creates a performance issue for string concatenation
 func (v *stringConcatVisitor) createIssue(assign *ast.AssignStmt, message string) {
 	position := v.fset.Position(assign.Pos())
 
@@ -150,7 +175,6 @@ func (v *stringConcatVisitor) createIssue(assign *ast.AssignStmt, message string
 	v.issues = append(v.issues, issue)
 }
 
-// generateSuggestion provides actionable advice for string concatenation
 func (v *stringConcatVisitor) generateSuggestion() string {
 	return `Use strings.Builder for efficient string concatenation:
 	

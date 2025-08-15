@@ -5,28 +5,40 @@ import (
 	"go/ast"
 	"go/token"
 
+	"gophercheck/internal/config"
 	"gophercheck/internal/models"
 )
 
 // ComplexityDetector calculates cyclomatic complexity of functions
-type ComplexityDetector struct{}
+type ComplexityDetector struct {
+	config *config.Config
+}
 
 // NewComplexityDetector creates a new complexity detector
 func NewComplexityDetector() *ComplexityDetector {
 	return &ComplexityDetector{}
 }
 
-// Name returns the detector name
+func NewComplexityDetectorWithConfig(cfg *config.Config) *ComplexityDetector {
+	return &ComplexityDetector{
+		config: cfg,
+	}
+}
+
+func (d *ComplexityDetector) SetConfig(cfg *config.Config) {
+	d.config = cfg
+}
+
 func (d *ComplexityDetector) Name() string {
 	return "Cyclomatic Complexity Detector"
 }
 
-// Detect finds functions with high cyclomatic complexity
 func (d *ComplexityDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
 	detector := &complexityVisitor{
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
+		detector: d,
 	}
 
 	ast.Walk(detector, file)
@@ -37,20 +49,23 @@ type complexityVisitor struct {
 	fset     *token.FileSet
 	filename string
 	issues   []models.Issue
+	detector *ComplexityDetector
 }
 
-// Visit implements the ast.Visitor interface
 func (v *complexityVisitor) Visit(node ast.Node) ast.Visitor {
 	if fn, ok := node.(*ast.FuncDecl); ok && fn.Body != nil {
 		complexity := v.calculateComplexity(fn.Body)
-		if complexity > 10 { // Threshold for reporting
+		threshold := 10
+		if v.detector.config != nil && v.detector.config.Rules.Complexity.CyclomaticComplexity.Enabled {
+			threshold = v.detector.config.Rules.Complexity.CyclomaticComplexity.MediumThreshold
+		}
+		if complexity > threshold {
 			v.createComplexityIssue(fn, complexity)
 		}
 	}
 	return v
 }
 
-// calculateComplexity calculates the cyclomatic complexity of a function body
 func (v *complexityVisitor) calculateComplexity(body *ast.BlockStmt) int {
 	complexity := 1 // Base complexity
 
@@ -100,7 +115,6 @@ func (v *complexityVisitor) calculateComplexity(body *ast.BlockStmt) int {
 	return complexity
 }
 
-// createComplexityIssue creates an issue for high cyclomatic complexity
 func (v *complexityVisitor) createComplexityIssue(fn *ast.FuncDecl, complexity int) {
 	position := v.fset.Position(fn.Pos())
 	funcName := "anonymous"
@@ -124,19 +138,29 @@ func (v *complexityVisitor) createComplexityIssue(fn *ast.FuncDecl, complexity i
 	v.issues = append(v.issues, issue)
 }
 
-// calculateSeverity determines severity based on complexity score
 func (v *complexityVisitor) calculateSeverity(complexity int) models.Severity {
+	mediumThreshold := 10
+	highThreshold := 15
+	criticalThreshold := 25
+
+	if v.detector.config != nil && v.detector.config.Rules.Complexity.CyclomaticComplexity.Enabled {
+		mediumThreshold = v.detector.config.Rules.Complexity.CyclomaticComplexity.MediumThreshold
+		highThreshold = v.detector.config.Rules.Complexity.CyclomaticComplexity.HighThreshold
+		criticalThreshold = v.detector.config.Rules.Complexity.CyclomaticComplexity.CriticalThreshold
+	}
+
 	switch {
-	case complexity <= 15:
+	case complexity <= mediumThreshold:
 		return models.SeverityMedium
-	case complexity <= 25:
+	case complexity <= highThreshold:
 		return models.SeverityHigh
+	case complexity <= criticalThreshold:
+		return models.SeverityCritical
 	default:
 		return models.SeverityCritical
 	}
 }
 
-// generateComplexitySuggestion provides advice for reducing complexity
 func (v *complexityVisitor) generateComplexitySuggestion(complexity int) string {
 	suggestions := []string{
 		"Consider breaking this function into smaller, single-purpose functions",
