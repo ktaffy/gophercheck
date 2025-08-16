@@ -194,7 +194,6 @@ type FilesConfig struct {
 	MaxFileSize int `yaml:"max_file_size" json:"max_file_size"`
 }
 
-// DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		Version: "1.0",
@@ -212,7 +211,7 @@ func DefaultConfig() *Config {
 			Format:          "console",
 			Colors:          true,
 			Verbose:         false,
-			ShowSuggestions: true,
+			ShowSuggestions: false,
 		},
 		Rules: RulesConfig{
 			Complexity: ComplexityRules{

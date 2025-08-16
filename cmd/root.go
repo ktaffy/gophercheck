@@ -11,7 +11,6 @@ import (
 
 	"gophercheck/internal/analyzer"
 	"gophercheck/internal/config"
-	"gophercheck/internal/models"
 	"gophercheck/internal/watcher"
 
 	"github.com/fatih/color"
@@ -23,6 +22,7 @@ var (
 	watchFlag          bool
 	configFlag         string
 	generateConfigFlag bool
+	verboseFlag        bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -56,6 +56,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&watchFlag, "watch", "w", false, "Watch mode for development")
 	rootCmd.Flags().StringVarP(&configFlag, "config", "c", "", "Path to configuration file")
 	rootCmd.Flags().BoolVar(&generateConfigFlag, "generate-config", false, "Generate sample configuration file")
+	rootCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed output with suggestions")
 }
 
 func runAnalysis(cmd *cobra.Command, args []string) {
@@ -72,6 +73,12 @@ func runAnalysis(cmd *cobra.Command, args []string) {
 
 	if formatFlag != "" {
 		cfg.Output.Format = formatFlag
+	}
+
+	verboseFlag, _ := cmd.Flags().GetBool("verbose")
+	if verboseFlag {
+		cfg.Output.Verbose = true
+		cfg.Output.ShowSuggestions = true
 	}
 
 	if len(args) == 0 {
@@ -277,83 +284,18 @@ func handleFileChanges(changedFiles []string, cfg *config.Config, analyzerEngine
 	if err != nil {
 		color.Red("Analysis failed: %v\n", err)
 		color.Yellow("Continuing to watch for changes...\n\n")
-		return nil // Don't stop watching on analysis errors
+		return nil
 	}
 
 	if result.TotalIssues > 0 {
-		if cfg.Output.Format == "json" {
-			report := reportGen.Generate(result)
-			fmt.Print(report)
-		} else {
-			generateCompactWatchReport(result, cfg)
-		}
+		report := reportGen.Generate(result)
+		fmt.Print(report)
 	} else {
 		color.Green("✅ No issues found in changed files (Score: %d/100)\n", result.PerformanceScore)
 	}
 
 	color.White("─────────────────────────────────────────\n\n")
 	return nil
-}
-
-func generateCompactWatchReport(result *models.AnalysisResult, cfg *config.Config) {
-	score := result.PerformanceScore
-	var scoreColor func(a ...interface{}) string
-	var emoji string
-
-	switch {
-	case score >= cfg.Analysis.ScoreThresholds.Excellent:
-		scoreColor = color.New(color.FgGreen).SprintFunc()
-		emoji = "🌟"
-	case score >= cfg.Analysis.ScoreThresholds.Good:
-		scoreColor = color.New(color.FgYellow).SprintFunc()
-		emoji = "⚡"
-	case score >= cfg.Analysis.ScoreThresholds.Fair:
-		scoreColor = color.New(color.FgHiYellow).SprintFunc()
-		emoji = "⚠️"
-	default:
-		scoreColor = color.New(color.FgRed).SprintFunc()
-		emoji = "🚨"
-	}
-
-	if cfg.Output.Colors {
-		scoreText := scoreColor(fmt.Sprintf("%d", score))
-		fmt.Printf("%s Score: %s/100 | Issues: %d\n", emoji, scoreText, result.TotalIssues)
-	} else {
-		fmt.Printf("Score: %d/100 | Issues: %d\n", score, result.TotalIssues)
-	}
-
-	if len(result.IssuesBySeverity) > 0 {
-		var severityCounts []string
-		severities := []string{"CRITICAL", "HIGH", "MEDIUM", "LOW"}
-		for _, severity := range severities {
-			if count := result.IssuesBySeverity[severity]; count > 0 {
-				severityCounts = append(severityCounts, fmt.Sprintf("%s: %d", severity, count))
-			}
-		}
-		if len(severityCounts) > 0 {
-			color.White("Issues: %s\n", strings.Join(severityCounts, ", "))
-		}
-	}
-
-	if len(result.Issues) > 0 && cfg.Output.Verbose {
-		color.White("Recent issues:\n")
-		maxShow := 3
-		if len(result.Issues) < maxShow {
-			maxShow = len(result.Issues)
-		}
-
-		for i := 0; i < maxShow; i++ {
-			issue := result.Issues[i]
-			color.White("  • %s:%d - %s\n",
-				filepath.Base(issue.File),
-				issue.Line,
-				issue.Type)
-		}
-
-		if len(result.Issues) > maxShow {
-			color.White("  ... and %d more\n", len(result.Issues)-maxShow)
-		}
-	}
 }
 
 func writeReportToFile(report, filePath string) error {
