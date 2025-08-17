@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"gophercheck/internal/config"
+	"gophercheck/internal/context"
 	"gophercheck/internal/models"
 )
 
@@ -30,7 +31,7 @@ func (d *SliceGrowthDetector) Name() string {
 	return "Slice Growth Pattern Detector"
 }
 
-func (d *SliceGrowthDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
+func (d *SliceGrowthDetector) Detect(file *ast.File, fset *token.FileSet, filename string, ctx *context.AnalysisContext) []models.Issue {
 	detector := &sliceGrowthVisitor{
 		fset:        fset,
 		filename:    filename,
@@ -38,6 +39,7 @@ func (d *SliceGrowthDetector) Detect(file *ast.File, fset *token.FileSet, filena
 		sliceVars:   make(map[string]*sliceInfo),
 		currentFunc: "",
 		detector:    d,
+		context:     ctx,
 	}
 
 	ast.Walk(detector, file)
@@ -61,6 +63,7 @@ type sliceGrowthVisitor struct {
 	inLoop      bool
 	loopDepth   int
 	detector    *SliceGrowthDetector
+	context     *context.AnalysisContext
 }
 
 func (v *sliceGrowthVisitor) Visit(node ast.Node) ast.Visitor {

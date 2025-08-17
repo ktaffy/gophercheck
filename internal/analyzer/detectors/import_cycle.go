@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"gophercheck/internal/config"
+	"gophercheck/internal/context"
 	"gophercheck/internal/models"
 	"path"
 	"strings"
@@ -46,12 +47,13 @@ type packageInfo struct {
 	line     int
 }
 
-func (d *ImportCycleDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
+func (d *ImportCycleDetector) Detect(file *ast.File, fset *token.FileSet, filename string, ctx *context.AnalysisContext) []models.Issue {
 	detector := &importCycleVisitor{
 		detector: d,
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
+		context:  ctx,
 	}
 
 	ast.Walk(detector, file)
@@ -71,6 +73,7 @@ type importCycleVisitor struct {
 	filename    string
 	issues      []models.Issue
 	packageName string
+	context     *context.AnalysisContext
 }
 
 func (v *importCycleVisitor) Visit(node ast.Node) ast.Visitor {

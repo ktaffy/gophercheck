@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"gophercheck/internal/config"
+	"gophercheck/internal/context"
 	"gophercheck/internal/models"
 	"strings"
 )
@@ -31,7 +32,7 @@ func (d *MemoryAllocDetector) Name() string {
 	return "Memory Allocation Detector"
 }
 
-func (d *MemoryAllocDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
+func (d *MemoryAllocDetector) Detect(file *ast.File, fset *token.FileSet, filename string, ctx *context.AnalysisContext) []models.Issue {
 	detector := &memoryAllocVisitor{
 		fset:        fset,
 		filename:    filename,
@@ -39,6 +40,7 @@ func (d *MemoryAllocDetector) Detect(file *ast.File, fset *token.FileSet, filena
 		loopDepth:   0,
 		currentFunc: "",
 		detector:    d,
+		context:     ctx,
 	}
 	ast.Walk(detector, file)
 	return detector.issues
@@ -52,6 +54,7 @@ type memoryAllocVisitor struct {
 	currentFunc string
 	inLoop      bool
 	detector    *MemoryAllocDetector
+	context     *context.AnalysisContext
 }
 
 func (v *memoryAllocVisitor) Visit(node ast.Node) ast.Visitor {

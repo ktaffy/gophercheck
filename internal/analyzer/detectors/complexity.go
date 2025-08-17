@@ -6,6 +6,7 @@ import (
 	"go/token"
 
 	"gophercheck/internal/config"
+	"gophercheck/internal/context"
 	"gophercheck/internal/models"
 )
 
@@ -33,12 +34,13 @@ func (d *ComplexityDetector) Name() string {
 	return "Cyclomatic Complexity Detector"
 }
 
-func (d *ComplexityDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
+func (d *ComplexityDetector) Detect(file *ast.File, fset *token.FileSet, filename string, ctx *context.AnalysisContext) []models.Issue {
 	detector := &complexityVisitor{
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
 		detector: d,
+		context:  ctx,
 	}
 
 	ast.Walk(detector, file)
@@ -50,6 +52,7 @@ type complexityVisitor struct {
 	filename string
 	issues   []models.Issue
 	detector *ComplexityDetector
+	context  *context.AnalysisContext
 }
 
 func (v *complexityVisitor) Visit(node ast.Node) ast.Visitor {

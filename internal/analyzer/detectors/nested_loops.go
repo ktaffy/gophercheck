@@ -6,6 +6,7 @@ import (
 	"go/token"
 
 	"gophercheck/internal/config"
+	"gophercheck/internal/context"
 	"gophercheck/internal/models"
 )
 
@@ -31,12 +32,13 @@ func (d *NestedLoopDetector) Name() string {
 	return "Nested Loop Detector"
 }
 
-func (d *NestedLoopDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
+func (d *NestedLoopDetector) Detect(file *ast.File, fset *token.FileSet, filename string, ctx *context.AnalysisContext) []models.Issue {
 	detector := &nestedLoopVisitor{
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
 		detector: d,
+		context:  ctx,
 	}
 	ast.Walk(detector, file)
 	return detector.issues
@@ -49,6 +51,7 @@ type nestedLoopVisitor struct {
 	loopDepth   int
 	currentFunc string
 	detector    *NestedLoopDetector
+	context     *context.AnalysisContext
 }
 
 func (v *nestedLoopVisitor) Visit(node ast.Node) ast.Visitor {
@@ -79,19 +82,31 @@ func (v *nestedLoopVisitor) Visit(node ast.Node) ast.Visitor {
 }
 
 func (v *nestedLoopVisitor) detectNestedLoop(node ast.Node) {
+	loopInfo, hasInfo := v.context.LoopContext[node]
+
+	if hasInfo && v.shouldSkipSmallLoop(loopInfo) {
+		return
+	}
+
 	pos := getNodePosition(node)
 	position := v.fset.Position(pos)
 
+	confidence := v.calculateConfidence(loopInfo, hasInfo)
+
+	if confidence < 0.6 {
+		return
+	}
+
 	issue := models.Issue{
 		Type:        models.IssueNestedLoops,
-		Severity:    v.calculateSeverity(),
+		Severity:    v.calculateSeverityWithContext(loopInfo, hasInfo),
 		File:        v.filename,
 		Line:        position.Line,
 		Column:      position.Column,
 		Function:    v.currentFunc,
-		Message:     v.generateMessage(),
-		Suggestion:  v.generateSuggestion(),
-		Complexity:  fmt.Sprintf("O(n^%d)", v.loopDepth),
+		Message:     v.generateContextualMessage(loopInfo, hasInfo),
+		Suggestion:  v.generateContextualSuggestion(loopInfo, hasInfo),
+		Complexity:  v.generateComplexityInfo(loopInfo, hasInfo),
 		CodeSnippet: position.String(),
 	}
 
@@ -157,4 +172,149 @@ func getNodePosition(node ast.Node) token.Pos {
 	default:
 		return token.NoPos
 	}
+}
+
+func (v *nestedLoopVisitor) shouldSkipSmallLoop(loopInfo *context.LoopInfo) bool {
+	if loopInfo == nil {
+		return false
+	}
+
+	if loopInfo.BoundType == context.BoundConstant && loopInfo.EstimatedMax > 0 && loopInfo.EstimatedMax <= 10 {
+		return true
+	}
+
+	if loopInfo.HasEarlyExit {
+		return true
+	}
+
+	return false
+}
+
+func (v *nestedLoopVisitor) calculateConfidence(loopInfo *context.LoopInfo, hasInfo bool) float64 {
+	if !hasInfo {
+		return 0.5 // Medium confidence if we don't have context
+	}
+
+	confidence := 0.8 // Base confidence
+
+	if loopInfo.BoundType == context.BoundVariable ||
+		(loopInfo.EstimatedMax > 100) {
+		confidence += 0.2
+	}
+
+	if loopInfo.HasEarlyExit {
+		confidence -= 0.3
+	}
+
+	if v.loopDepth >= 3 {
+		confidence += 0.1
+	}
+
+	return min(confidence, 1.0)
+}
+
+func (v *nestedLoopVisitor) calculateSeverityWithContext(loopInfo *context.LoopInfo, hasInfo bool) models.Severity {
+	baseSeverity := v.calculateSeverity() // Original method
+
+	if !hasInfo {
+		return baseSeverity
+	}
+
+	if loopInfo.BoundType == context.BoundConstant && loopInfo.EstimatedMax <= 50 {
+		if baseSeverity == models.SeverityCritical {
+			return models.SeverityHigh
+		}
+		if baseSeverity == models.SeverityHigh {
+			return models.SeverityMedium
+		}
+	}
+
+	if loopInfo.EstimatedMax > 1000 {
+		if baseSeverity == models.SeverityMedium {
+			return models.SeverityHigh
+		}
+		if baseSeverity == models.SeverityHigh {
+			return models.SeverityCritical
+		}
+	}
+
+	return baseSeverity
+}
+
+func (v *nestedLoopVisitor) generateContextualMessage(loopInfo *context.LoopInfo, hasInfo bool) string {
+	baseMsg := v.generateMessage() // Original method
+
+	if !hasInfo {
+		return baseMsg
+	}
+
+	switch loopInfo.BoundType {
+	case context.BoundConstant:
+		if loopInfo.EstimatedMax > 0 {
+			return fmt.Sprintf("%s (processing ~%d×%d = %d operations)",
+				baseMsg, loopInfo.EstimatedMax, loopInfo.EstimatedMax,
+				loopInfo.EstimatedMax*loopInfo.EstimatedMax)
+		}
+	case context.BoundLinear:
+		return fmt.Sprintf("%s (complexity depends on input size - could be O(n²))", baseMsg)
+	case context.BoundVariable:
+		return fmt.Sprintf("%s (unbounded - potentially very expensive)", baseMsg)
+	}
+
+	return baseMsg
+}
+
+func (v *nestedLoopVisitor) generateContextualSuggestion(loopInfo *context.LoopInfo, hasInfo bool) string {
+	baseSuggestion := v.generateSuggestion() // Original method
+
+	if !hasInfo {
+		return baseSuggestion
+	}
+
+	var contextSuggestion string
+
+	switch {
+	case loopInfo.BoundType == context.BoundConstant && loopInfo.EstimatedMax <= 100:
+		contextSuggestion = "\n\nNote: Since this involves small, bounded loops (~" +
+			fmt.Sprintf("%d", loopInfo.EstimatedMax) + " iterations), " +
+			"the performance impact may be acceptable. Consider profiling to confirm."
+
+	case loopInfo.HasEarlyExit:
+		contextSuggestion = "\n\nDetected early exit pattern - this might be optimized search logic. " +
+			"Consider: 1) Use a map for O(1) lookups, 2) Sort data and use binary search, " +
+			"3) Break outer loop when inner condition is met."
+
+	case loopInfo.BoundType == context.BoundLinear:
+		contextSuggestion = "\n\nThis appears to iterate over data structures. " +
+			"Consider: 1) Pre-processing data into a map, 2) Using a single loop with smarter logic, " +
+			"3) Algorithm change (sort + merge vs nested iteration)."
+
+	case v.loopDepth >= 3:
+		contextSuggestion = "\n\nCRITICAL: Triple-nested loops often indicate algorithmic issues. " +
+			"This likely needs a complete algorithmic redesign, not just optimization."
+	}
+
+	return baseSuggestion + contextSuggestion
+}
+
+func (v *nestedLoopVisitor) generateComplexityInfo(loopInfo *context.LoopInfo, hasInfo bool) string {
+	baseComplexity := fmt.Sprintf("O(n^%d)", v.loopDepth)
+
+	if !hasInfo {
+		return baseComplexity
+	}
+
+	if loopInfo.BoundType == context.BoundConstant && loopInfo.EstimatedMax > 0 {
+		return fmt.Sprintf("O(%d) - constant time with ~%d operations",
+			loopInfo.EstimatedMax*loopInfo.EstimatedMax, loopInfo.EstimatedMax*loopInfo.EstimatedMax)
+	}
+
+	return baseComplexity
+}
+
+func min(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
 }

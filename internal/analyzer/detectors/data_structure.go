@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"gophercheck/internal/config"
+	"gophercheck/internal/context"
 	"gophercheck/internal/models"
 )
 
@@ -30,7 +31,7 @@ func (d *DataStructureDetector) Name() string {
 	return "Data Structure Usage Detector"
 }
 
-func (d *DataStructureDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
+func (d *DataStructureDetector) Detect(file *ast.File, fset *token.FileSet, filename string, ctx *context.AnalysisContext) []models.Issue {
 	detector := &dataStructureVisitor{
 		fset:        fset,
 		filename:    filename,
@@ -39,6 +40,7 @@ func (d *DataStructureDetector) Detect(file *ast.File, fset *token.FileSet, file
 		inLoop:      false,
 		loopDepth:   0,
 		detector:    d,
+		context:     ctx,
 	}
 
 	ast.Walk(detector, file)
@@ -53,6 +55,7 @@ type dataStructureVisitor struct {
 	inLoop      bool
 	loopDepth   int
 	detector    *DataStructureDetector
+	context     *context.AnalysisContext
 }
 
 func (v *dataStructureVisitor) Visit(node ast.Node) ast.Visitor {

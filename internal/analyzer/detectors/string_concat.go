@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"gophercheck/internal/config"
+	"gophercheck/internal/context"
 	"gophercheck/internal/models"
 )
 
@@ -31,12 +32,13 @@ func (d *StringConcatDetector) Name() string {
 	return "String Concatenation Detector"
 }
 
-func (d *StringConcatDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
+func (d *StringConcatDetector) Detect(file *ast.File, fset *token.FileSet, filename string, ctx *context.AnalysisContext) []models.Issue {
 	detector := &stringConcatVisitor{
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
 		detector: d,
+		context:  ctx,
 	}
 
 	ast.Walk(detector, file)
@@ -50,6 +52,7 @@ type stringConcatVisitor struct {
 	inLoop      bool
 	currentFunc string
 	detector    *StringConcatDetector
+	context     *context.AnalysisContext
 }
 
 func (v *stringConcatVisitor) Visit(node ast.Node) ast.Visitor {

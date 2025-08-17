@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"gophercheck/internal/config"
+	"gophercheck/internal/context"
 	"gophercheck/internal/models"
 )
 
@@ -31,12 +32,13 @@ func (d *FunctionLengthDetector) Name() string {
 	return "Function Length Detector"
 }
 
-func (d *FunctionLengthDetector) Detect(file *ast.File, fset *token.FileSet, filename string) []models.Issue {
+func (d *FunctionLengthDetector) Detect(file *ast.File, fset *token.FileSet, filename string, ctx *context.AnalysisContext) []models.Issue {
 	detector := &functionLengthVisitor{
 		fset:     fset,
 		filename: filename,
 		issues:   make([]models.Issue, 0),
 		detector: d,
+		context:  ctx,
 	}
 
 	ast.Walk(detector, file)
@@ -48,6 +50,7 @@ type functionLengthVisitor struct {
 	filename string
 	issues   []models.Issue
 	detector *FunctionLengthDetector
+	context  *context.AnalysisContext
 }
 
 const (
