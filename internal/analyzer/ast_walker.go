@@ -141,21 +141,6 @@ func (a *Analyzer) GetConfig() *config.Config {
 	return a.config
 }
 
-func (a *Analyzer) analyzeFile(filename string) ([]models.Issue, error) {
-	file, err := parser.ParseFile(a.fileSet, filename, nil, parser.ParseComments)
-	if err != nil {
-		return nil, err
-	}
-
-	var allIssues []models.Issue
-	for _, detector := range a.detectors {
-		issues := detector.Detect(file, a.fileSet, filename, a.context)
-		allIssues = append(allIssues, issues...)
-	}
-
-	return allIssues, nil
-}
-
 func (a *Analyzer) GetDetectorCount() int {
 	return len(a.detectors)
 }
@@ -456,7 +441,7 @@ func (a *Analyzer) extractConstantInt(expr ast.Expr) int {
 	return -1
 }
 
-func (a *Analyzer) getVariableFromAssignment(expr ast.Expr) string {
+func (a *Analyzer) getVariableFromAssignment(_ ast.Expr) string {
 	// This is a simplified version - in reality this would traverse up
 	// the AST to find the assignment target
 	// For now, return empty string
