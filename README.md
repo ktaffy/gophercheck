@@ -34,7 +34,7 @@ A command-line static analysis tool that detects performance issues in Go code a
 ### Quick Start
 ```bash
 # Clone and build
-git clone https://github.com/yourusername/gophercheck.git
+git clone https://github.com/Sktaffy/gophercheck.git
 cd gophercheck
 go build -o gophercheck .
 
@@ -156,7 +156,7 @@ Flags:
 # GitHub Actions example
 - name: Performance Analysis
   run: |
-    go install github.com/yourusername/gophercheck@latest
+    go install github.com/ktaffy/gophercheck@latest
     gophercheck --format=json . > performance-report.json
     
 - name: Check Performance Score
