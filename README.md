@@ -74,7 +74,7 @@ go build -o gophercheck .
       Extract complex conditional logic into separate functions
 ```
 
-## 🏗️ Technical Architecture
+<!-- ## 🏗️ Technical Architecture
 
 ### Core Components
 - **AST Parser** - Uses Go's `go/ast` package for syntax tree analysis
@@ -120,7 +120,7 @@ gophercheck/
 - **Complexity Calculation** - McCabe cyclomatic complexity metrics
 - **Severity Assessment** - Risk-based issue prioritization
 
-## 🧪 Testing
+## 🧪 Testing -->
 
 Test the tool on the included sample file:
 ```bash
@@ -168,7 +168,7 @@ Flags:
     fi
 ```
 
-## 📈 Roadmap - What to Implement Next
+<!-- ## 📈 Roadmap - What to Implement Next
 
 ### 🎯 **Phase 3: CLI Polish & Enhanced Detection (Current Focus)**
 - [x] **Enhanced CLI UX** - Better progress indicators, improved error messages, help system
@@ -197,4 +197,4 @@ Flags:
 ### 🌐 **Phase 5: External Integration (Later)**
 - [ ] **HTML Report Generation** - Rich web-based reports with charts
 - [ ] **VS Code Extension** - IDE integration with inline suggestions
-- [ ] **Git Hook Templates** - Pre-commit and pre-push hook examples
+- [ ] **Git Hook Templates** - Pre-commit and pre-push hook examples -->
